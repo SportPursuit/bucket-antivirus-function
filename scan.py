@@ -18,6 +18,7 @@ import json
 import os
 from urllib.parse import unquote_plus
 from distutils.util import strtobool
+from botocore.vendored import requests
 
 import boto3
 
@@ -198,6 +199,20 @@ def sns_scan_results(
     )
 
 
+def sendSlackMessage(slack_info, blocks=None):
+    token = os.environ["SLACK_TOKEN"]
+    return requests.post(
+        "https://slack.com/api/chat.postMessage",
+        {
+            "token": token,
+            "channel": "#security",
+            "text": slack_info,
+            "as_user": True,
+            "blocks": json.dumps(blocks) if blocks else None,
+        },
+    ).json()
+
+
 def lambda_handler(event, context):
     s3 = boto3.resource("s3")
     s3_client = boto3.client("s3")
@@ -234,10 +249,13 @@ def lambda_handler(event, context):
         s3.Bucket(AV_DEFINITION_S3_BUCKET).download_file(s3_path, local_path)
         print("Downloading definition file %s complete!" % (local_path))
     scan_result, scan_signature = clamav.scan_file(file_path)
-    print(
-        "Scan of s3://%s resulted in %s\n"
-        % (os.path.join(s3_object.bucket_name, s3_object.key), scan_result)
+    message = "Scan of s3://%s resulted in %s\n" % (
+        os.path.join(s3_object.bucket_name, s3_object.key),
+        scan_result,
     )
+    if scan_result == AV_STATUS_INFECTED:
+        sendSlackMessage(message)
+    print(message)
 
     result_time = get_timestamp()
     # Set the properties on the object with the scan results
